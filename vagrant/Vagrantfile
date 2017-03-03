@@ -1,0 +1,81 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# All Vagrant configuration is done below. The "2" in Vagrant.configure
+# configures the configuration version (we support older styles for
+# backwards compatibility). Please don't change it unless you know what
+# you're doing.
+# The most common configuration options are documented and commented below.
+# For a complete reference, please see the online documentation at
+# https://docs.vagrantup.com.
+
+# Every Vagrant development environment requires a box. You can search for
+# boxes at https://atlas.hashicorp.com/search.
+
+BOX_IMAGE = "bento/ubuntu-16.04"
+NODE_COUNT = 1
+DB_NODE_COUNT = 1
+NGINX_BOX_NAME = "nginx"
+DB_BOX_NAME = "postgres"
+WEB_BOX_NAME = "web"
+PROJECT_TAG = "cydec"
+
+Vagrant.configure("2") do |config|
+
+  config.hostmanager.enabled = true
+  config.hostmanager.manage_host = true
+  config.hostmanager.manage_guest = true
+  config.hostmanager.ignore_private_ip = false
+  config.ssh.forward_agent = true
+  #you can install x11 in external custom bash script if needed
+  config.ssh.forward_x11 = true
+
+  config.vm.define NGINX_BOX_NAME do |subconfig|
+    subconfig.vm.box = BOX_IMAGE
+    subconfig.vm.hostname = "#{NGINX_BOX_NAME}.cydec"
+    subconfig.vm.network :private_network, ip: "10.0.0.10"
+    subconfig.vm.provider :virtualbox do |v|
+      v.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      v.customize ["modifyvm", :id, "--memory", 512]
+      v.customize ["modifyvm", :id, "--name", NGINX_BOX_NAME]
+    end
+    subconfig.vm.synced_folder "../nginx/", "/srv/website"
+  #  subconfig.vm.provision "shell", path: ".provision/nginx.sh"
+  end
+
+  (1..NODE_COUNT).each do |i|
+    config.vm.define "node#{i}" do |subconfig|
+      subconfig.vm.box = BOX_IMAGE
+      subconfig.vm.hostname = "node#{i}.cydec"
+      subconfig.vm.network :private_network, ip: "10.0.0.#{i + 20}"
+      subconfig.vm.provider :virtualbox do |v|
+        v.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+        v.customize ["modifyvm", :id, "--memory", 512]
+        v.customize ["modifyvm", :id, "--name", "node#{i}"]
+      end
+    end
+  end
+
+  (1..DB_NODE_COUNT).each do |j|
+    config.vm.define "#{DB_BOX_NAME}#{j}" do |subconfig|
+      subconfig.vm.box = BOX_IMAGE
+      subconfig.vm.hostname ="#{DB_BOX_NAME}#{j}.cydec"
+      subconfig.vm.network :private_network, ip: "10.0.0.#{j + 10}"
+      subconfig.vm.provider :virtualbox do |v|
+        v.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+        v.customize ["modifyvm", :id, "--memory", 512]
+        v.customize ["modifyvm", :id, "--name", "#{DB_BOX_NAME}#{j}"]
+      end
+      subconfig.vm.provision "ansible" do |ansible|
+        ansible.playbook = "provision/postgres.yml"
+        ansible.sudo = true
+        ansible.host_key_checking = false
+      end
+      subconfig.vm.network "forwarded_port", guest: 5432, host: "#{6543+j}", id: "postgres"
+    end
+  end
+
+  # Install avahi on all machines
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+ # config.vm.provision "shell", path: ".provision/avahi.sh"
+end
